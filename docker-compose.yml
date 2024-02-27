@@ -7,7 +7,6 @@ services:
       context: .
       dockerfile: Dockerfile
     hostname: api01
-    #restart: on-failure
     environment:
       - DB_HOSTNAME=rinha
     ports:
@@ -17,7 +16,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.6"
+          cpus: "0.45"
           memory: "200MB"
 
   api02:
@@ -40,7 +39,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.17"
+          cpus: "0.15"
           memory: "10MB"
 
   db:
@@ -58,7 +57,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.13"
+          cpus: "0.45"
           memory: "140MB"
 
 networks:
