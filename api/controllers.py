@@ -1,83 +1,85 @@
-import psycopg2
+import psycopg
 
-from psycopg2 import sql
+from psycopg import sql
 from datetime import datetime
 
-from database import db_connection
+from db import pool
 from errors import HttpNotFoundError, HttpUnprocessableEntityError
 
 class Controllers:
    def __init__(self) -> None:
-      self.db_connection = db_connection
-      self.cursor        = db_connection.cursor()
+      self.pool = pool
 
 
    def make_transactions(self, client_id, transaction):
-      self.cursor.execute(
-         'SELECT saldo, limite FROM clientes WHERE id = %s',
-         (client_id)
-      )
-      client = self.cursor.fetchone()
+      values, type_transaction, description = transaction['values'], transaction['type'], transaction['description']
 
-      if not client:
-         raise HttpNotFoundError('cliente não encontrado')
+      with self.pool.connection() as conn:
+         cursor = conn.execute(
+            'SELECT saldo, limite FROM clientes WHERE id = %s',
+            (client_id,)
+         )
 
-      [balance, limit] = client
+         client = cursor.fetchone()
 
-      if transaction['type'] == 'c':
-         balance += transaction['values']
-      else:
-         limit_infringed = (balance - transaction['values'])
-         if limit_infringed < -limit:
+         if not client:
+            raise HttpNotFoundError('cliente não encontrado')
+
+         [balance, limit] = client
+
+         if type_transaction == 'c':
+            balance += values
+         elif not (limit_infringed := (balance - values)) < -limit:
+            balance = limit_infringed
+         else: 
             raise HttpUnprocessableEntityError('O saldo é menor que o limite permitido.')
-         balance = limit_infringed
 
-      self.cursor.execute(
-         'INSERT INTO transacoes (cliente_id, tipo, valor, descricao) VALUES (%s, %s, %s, %s)',
-         (client_id, transaction['type'], transaction['values'], transaction['description'])
-      )
+         cursor = conn.execute(
+            'UPDATE clientes SET saldo = %s WHERE id = %s',
+            (balance, client_id)
+         )
 
-      self.cursor.execute(
-         'UPDATE clientes SET saldo = %s WHERE id = %s',
-         (balance, client_id)
-      )
-      self.db_connection.commit()
+         conn.execute(
+            'INSERT INTO transacoes (cliente_id, tipo, valor, descricao) VALUES (%s, %s, %s, %s)',
+            (client_id, type_transaction, values, description)
+         )
+         conn.commit()
 
-      return balance, limit
+         return balance, limit
 
 
    def get_extract(self, client_id):
-      self.cursor.execute(
-         'SELECT saldo, limite FROM clientes WHERE id = %s',
-         (client_id)
-      )
-      client = self.cursor.fetchone()
+      with self.pool.connection() as conn:
+         cursor = conn.execute(
+            'SELECT saldo, limite FROM clientes WHERE id = %s',
+            (client_id,)
+         )
+         client = cursor.fetchone()
 
-      if not client:
-         raise HttpNotFoundError('cliente não encontrado')
+         if not client:
+            raise HttpNotFoundError('cliente não encontrado')
 
-      [balance, limit] = client
+         [balance, limit] = client
 
-      self.cursor.execute(
-         'SELECT * FROM transacoes WHERE cliente_id = %s ORDER BY ID DESC LIMIT 10',
-         (client_id)
-      )
+         cursor = conn.execute(
+            'SELECT * FROM transacoes WHERE cliente_id = %s ORDER BY ID DESC LIMIT 10',
+            (client_id,)
+         )
+         transactions_data = cursor.fetchall()
 
-      transactions_data = self.cursor.fetchall()
-
-      return {
-      "saldo": {
-         "total": balance,
-         "data_extrato": datetime.utcnow().isoformat(),
-         "limite": limit
-      },
-      "ultimas_transacoes": [
-         {
-            "valor": data[2],
-            "tipo": data[3],
-            "descricao": data[4],
-            "realizada_em": data[5].isoformat()
-         } 
-         for data in transactions_data
-      ]
-   }
+         return {
+         "saldo": {
+            "total": balance,
+            "data_extrato": datetime.utcnow().isoformat(),
+            "limite": limit
+         },
+         "ultimas_transacoes": [
+            {
+               "valor": data[2],
+               "tipo": data[3],
+               "descricao": data[4],
+               "realizada_em": data[5].isoformat()
+            } 
+            for data in transactions_data
+         ]
+      }
